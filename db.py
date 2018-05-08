@@ -1,12 +1,15 @@
-import psycopg2
-from psycopg2.extensions import AsIs
-from dbinfo import *
 import sys
 import itertools
 import datetime
+
+import psycopg2
+from psycopg2.extensions import AsIs
 import pytz
 
-default_schema="default"
+from dbinfo import *
+
+default_schema = "default"
+
 
 class Database(object):
     """this class uses info stored in dbinfo.py (database, user, host, port, password, and 
@@ -28,32 +31,36 @@ class Database(object):
     schema and tables. It is vulnerable to injection, so don't use it if you don't 
     have a sanitized schema name."""
     dbtype = 'postgres'
+
     def clone(self):
         """returns a copy of itself, but with different connections/cursors"""
-        return Database(self.name, self,unique_ids, self.silence)
-    
+        return Database(self.name, self, unique_ids, self.silence)
+
     def __init__(self, name=default_schema,
-                 unique_ids={'comments':True,'users':True,'threads':True,'subreddits':True},
-                 silence=False):
-        #initialize connection
-        self.conn = psycopg2.connect(database=database, user=username, host=host, port=port,
+        unique_ids={
+            'comments': True, 'users': True, 'threads': True, 'subreddits': True
+            },
+        silence=False):
+        # initialize connection
+        self.conn = psycopg2.connect(database=database, user=username,
+                                     host=host, port=port,
                                      password=password)
         self.cur = self.conn.cursor()
         if not silence:
             print unique_ids
-        self.unique_ids = unique_ids#for clone method
-        self.schema=name
+        self.unique_ids = unique_ids  # for clone method
+        self.schema = name
         self.silence = silence
         if not silence:
             print 'started connection'
-        #make schema and tables
+        # make schema and tables
         if not silence:
             print """CREATE SCHEMA IF NOT EXISTS %s;""" % self.schema
         self.cur.execute("""CREATE SCHEMA IF NOT EXISTS %s;""" % self.schema)
         if not silence:
             print 'made schema'
         self.make_log_table()
-        if unique_ids.get('threads',True):
+        if unique_ids.get('threads', True):
             self.cur.execute("""CREATE TABLE IF NOT EXISTS %s.threads(
             id CHAR(6) PRIMARY KEY,
             title TEXT,
@@ -63,7 +70,7 @@ class Database(object):
             score INT,
             percentage FLOAT,
             author_name VARCHAR(30),
-            author_id VARCHAR(7),
+            author_id VARCHAR(100),
             edited TIMESTAMP,
             author_flair TEXT,
             author_flair_css_class TEXT,
@@ -100,7 +107,7 @@ class Database(object):
             score INT,
             percentage FLOAT,
             author_name VARCHAR(30),
-            author_id VARCHAR(7),
+            author_id VARCHAR(100),
             edited TIMESTAMP,
             author_flair TEXT,
             author_flair_css_class TEXT,
@@ -126,14 +133,14 @@ class Database(object):
             );""" % self.schema)
         if not self.silence:
             print 'made threads table'
-        if unique_ids.get('users',True):
-            #main info
-            #username is primary key due to existence of shadowbanned users, who
-            #are only identified by name and have no other record other than comments
-            #manually encountered
+        if unique_ids.get('users', True):
+            # main info
+            # username is primary key due to existence of shadowbanned users, who
+            # are only identified by name and have no other record other than comments
+            # manually encountered
             self.cur.execute("""CREATE TABLE IF NOT EXISTS %s.users(
             username VARCHAR(30) PRIMARY KEY,
-            id VARCHAR(7),
+            id VARCHAR(100),
             comment_karma INT,
             post_karma INT,
             is_mod BOOLEAN,
@@ -144,11 +151,11 @@ class Database(object):
             deleted_by_date TIMESTAMP,
             timestamp TIMESTAMP
             );""" % self.schema)
-            
+
         else:
             self.cur.execute("""CREATE TABLE IF NOT EXISTS %s.users(
             username VARCHAR(30),
-            id VARCHAR(7),
+            id VARCHAR(100),
             comment_karma INT,
             post_karma INT,
             is_mod BOOLEAN,
@@ -168,7 +175,7 @@ class Database(object):
             self.cur.execute("""CREATE TABLE IF NOT EXISTS %s.comments(
             id VARCHAR(8) PRIMARY KEY,
             author_name VARCHAR(30),
-            author_id VARCHAR(7),
+            author_id VARCHAR(100),
             parent_id VARCHAR(11),
             is_root BOOLEAN,
             text TEXT,
@@ -193,7 +200,7 @@ class Database(object):
             self.cur.execute("""CREATE TABLE IF NOT EXISTS %s.comments(
             id VARCHAR(8),
             author_name VARCHAR(30),
-            author_id VARCHAR(7),
+            author_id VARCHAR(100),
             parent_id VARCHAR(11),
             is_root BOOLEAN,
             text TEXT,
@@ -216,7 +223,7 @@ class Database(object):
             print 'made comments table'
         self.usertable = '%s.users' % self.schema
         self.threadtable = '%s.threads' % self.schema
-        self.commenttable = '%s.comments'% self.schema
+        self.commenttable = '%s.comments' % self.schema
         self.create_moderator_table()
         self.create_traffic_table()
         self.create_related_subreddits_table()
@@ -224,28 +231,30 @@ class Database(object):
         self.commit()
         if not self.silence:
             print 'committed initial config'
-        #create indexes
-        #hold off for now 
-        
-    def execute(self,*args,**kwargs):
+            # create indexes
+            # hold off for now
+
+    def execute(self, *args, **kwargs):
         return self.cur.execute(*args, **kwargs)
 
     def insert_user(self, data):
         cols = data.keys()
         values = [data[key] for key in cols]
         statement = ('INSERT INTO %s' % self.schema) + '.users(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
         self.commit()
 
     def get_user_update_time(self, user_id):
         try:
-            self.execute(("SELECT max(timestamp) FROM %s.users WHERE" % self.schema) +\
-                         " id=%s",[user_id])
+            self.execute(
+                ("SELECT max(timestamp) FROM %s.users WHERE" % self.schema) + \
+                " id=%s", [user_id])
             return self.fetchall()[0][0]
         except:
             return None
-        
+
     def check_user_update_time(self, user_id, opts):
         update_time = self.get_user_update_time(user_id)
         if not update_time:
@@ -255,17 +264,19 @@ class Database(object):
         else:
             now = datetime.datetime.now(pytz.utc)
             update_time = pytz.utc.localize(update_time)
-            if (now - update_time).seconds < 3600*24 * opts.user_delay - (now-update_time).days:
+            if (now - update_time).seconds < 3600 * 24 * opts.user_delay - (
+                now - update_time).days:
                 return False
             return True
-        
+
     def get_thread_update_time(self, thread_id):
         try:
-            self.execute(("SELECT max(timestamp) FROM %s.threads WHERE" % self.schema) +\
-                         " id=%s AND scrape_mode='thread'",[thread_id])
-            update_time =  self.fetchall()[0][0]
-            #print thread_id
-            #print update_time
+            self.execute(
+                ("SELECT max(timestamp) FROM %s.threads WHERE" % self.schema) + \
+                " id=%s AND scrape_mode='thread'", [thread_id])
+            update_time = self.fetchall()[0][0]
+            # print thread_id
+            # print update_time
             return update_time
         except psycopg2.ProgrammingError:
             print 'cannot get thread update time...check for bugs'
@@ -274,8 +285,9 @@ class Database(object):
 
     def get_subreddit_update_time(self, subreddit_text):
         try:
-            self.execute(("SELECT max(timestamp) FROM %s.subreddits WHERE" % self.schema) +\
-                         " subreddit=%s",[subreddit_text])
+            self.execute((
+                         "SELECT max(timestamp) FROM %s.subreddits WHERE" % self.schema) + \
+                         " subreddit=%s", [subreddit_text])
             return self.fetchall()[0][0]
         except:
             print sys.exc_info()
@@ -290,63 +302,72 @@ class Database(object):
         else:
             now = datetime.datetime.now(pytz.utc)
             update_time = pytz.utc.localize(update_time)
-            if (now - update_time).seconds < 3600*24 * opts.subreddit_delay - \
-               (now-update_time).days:
+            if (now - update_time).seconds < 3600 * 24 * opts.subreddit_delay - \
+                (now - update_time).days:
                 return False
             return True
 
     def update_user(self, data):
         cols = data.keys()
         values = [data[key] for key in cols]
-        statement = ('UPDATE %s' % self.schema) + '.users SET ' + make_update_template(values) + \
+        statement = (
+                    'UPDATE %s' % self.schema) + '.users SET ' + make_update_template(
+            values) + \
                     ' WHERE id=\'%s\'' % data['id']
         self.execute(statement, make_update_data(cols, values))
 
-
     def insert_thread(self, data):
-        #print data
+        # print data
         cols = data.keys()
         values = [data[key] for key in cols]
         statement = ('INSERT INTO %s' % self.schema) + '.threads(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
 
     def update_thread(self, data):
         cols = data.keys()
         values = [data[key] for key in cols]
-        statement = ('UPDATE %s' % self.schema) + '.threads SET ' + make_update_template(values) + \
+        statement = (
+                    'UPDATE %s' % self.schema) + '.threads SET ' + make_update_template(
+            values) + \
                     ' WHERE id=\'%s\'' % data['id']
         self.execute(statement, make_update_data(cols, values))
 
-
     def insert_comment(self, data):
-        #print data
+        # print data
         cols = data.keys()
         values = [data[key] for key in cols]
-        statement = ('INSERT INTO %s' % self.schema) + '.comments(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        statement = (
+                    'INSERT INTO %s' % self.schema) + '.comments(%s) values %s;'
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
 
     def update_comment(self, data):
         cols = data.keys()
         values = [data[key] for key in cols]
 
-        statement = ('UPDATE %s' % self.schema) + '.comments SET ' + make_update_template(values)+ \
+        statement = (
+                    'UPDATE %s' % self.schema) + '.comments SET ' + make_update_template(
+            values) + \
                     ' WHERE id=\'%s\'' % data['id']
         self.execute(statement, make_update_data(cols, values))
 
     def insert_subreddit(self, data):
         cols = data.keys()
         values = [data[key] for key in cols]
-        statement = ('INSERT INTO %s' % self.schema) + '.subreddits(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        statement = (
+                    'INSERT INTO %s' % self.schema) + '.subreddits(%s) values %s;'
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
 
     def update_subreddit(self, data):
         cols = data.keys()
         values = [data[key] for key in cols]
         statement = ('UPDATE %s' % self.schema) + '.subreddits SET ' + \
-                    make_update_template(values)+ \
+                    make_update_template(values) + \
                     ' WHERE subreddit=\'%s\'' % data['subreddit']
         self.execute(statement, make_update_data(cols, values))
 
@@ -362,13 +383,13 @@ class Database(object):
         return result is not None
 
     def insert_traffic(self, data):
-        #print data
+        # print data
         cols = data.keys()
         values = [data[key] for key in cols]
         statement = ('INSERT INTO %s' % self.schema) + '.traffic(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
-
 
     def update_traffic(self, data):
         cols = data.keys()
@@ -378,42 +399,43 @@ class Database(object):
                      WHERE subreddit=%%s AND
         period_type=%%s AND
         time=%%s""" % (self.schema, make_update_template(values))
-        self.execute(statement, make_update_data(cols, values) + [data['subreddit'],
-                                                                  data['period_type'],
-                                                                  data['time']])
+        self.execute(statement,
+                     make_update_data(cols, values) + [data['subreddit'],
+                                                       data['period_type'],
+                                                       data['time']])
 
-        
-    #for now wiki and related_subreddits are in history mode
-    #so queries that search for subreddits that have been collected multiple times should
-    #use "HAVING max(timestamp)" in a GROUP BY clause can alleviate this easily
+    # for now wiki and related_subreddits are in history mode
+    # so queries that search for subreddits that have been collected multiple times should
+    # use "HAVING max(timestamp)" in a GROUP BY clause can alleviate this easily
     def insert_wiki(self, data):
-        #print data
+        # print data
         cols = data.keys()
         values = [data[key] for key in cols]
         statement = ('INSERT INTO %s' % self.schema) + '.wikis(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
-
 
     def insert_related_subreddit(self, data):
-        #print data
+        # print data
         cols = data.keys()
         values = [data[key] for key in cols]
-        statement = ('INSERT INTO %s' % self.schema) + '.related_subreddits(%s) values %s;'
-        parsed_statement = self.cur.mogrify(statement, (AsIs(','.join(cols)), tuple(values)))
+        statement = (
+                    'INSERT INTO %s' % self.schema) + '.related_subreddits(%s) values %s;'
+        parsed_statement = self.cur.mogrify(statement, (
+        AsIs(','.join(cols)), tuple(values)))
         self.execute(parsed_statement)
-
 
     def commit(self):
         self.conn.commit()
         return True
-    
+
     def fetchall(self):
         return self.cur.fetchall()
-    
+
     def fetchone(self):
         return self.cur.fetchone()
-    
+
     def fetchmany(self, *args, **kwargs):
         return self.cur.fetchmany(*args, **kwargs)
 
@@ -427,7 +449,8 @@ class Database(object):
         self.execute("DROP TABLE IF EXISTS %s.subreddits;" % self.schema)
         self.execute("DROP TABLE IF EXISTS %s.moderators;" % self.schema)
         self.execute("DROP TABLE IF EXISTS %s.traffic;" % self.schema)
-        self.execute("DROP TABLE IF EXISTS %s.related_subreddits;" % self.schema)
+        self.execute(
+            "DROP TABLE IF EXISTS %s.related_subreddits;" % self.schema)
         self.execute("DROP TABLE IF EXISTS %s.wikis;" % self.schema)
         if not exclude_schema:
             self.execute("DROP SCHEMA %s;" % self.schema)
@@ -435,7 +458,7 @@ class Database(object):
         self.commit()
 
     def make_subreddit_table(self, unique_ids):
-        if unique_ids.get('subreddits',True):
+        if unique_ids.get('subreddits', True):
             self.execute("""CREATE TABLE IF NOT EXISTS %s.subreddits(
             subreddit VARCHAR(30) PRIMARY KEY,
             accounts_active INTEGER,
@@ -477,12 +500,14 @@ class Database(object):
         notes TEXT);""")
 
     def add_log_entry(self, opts):
-        data={'start_time':opts.start_time,
-              'end_time':None,
-              'command':opts.original_command,
-              'stop_reason':None,
-              'notes':None}
-        
+        data = {
+            'start_time': opts.start_time,
+            'end_time': None,
+            'command': opts.original_command,
+            'stop_reason': None,
+            'notes': None
+            }
+
         self.execute(("INSERT INTO %s.log(start_time, " % self.schema) + """
                      end_time,
                      command,
@@ -499,27 +524,30 @@ class Database(object):
 
     def update_log_entry(self, opts, reason, notes=None):
         start_time = opts.start_time
-        data={'end_time':datetime.datetime.now(pytz.utc),
-              'stop_reason':reason,
-              'notes':notes}
+        data = {
+            'end_time': datetime.datetime.now(pytz.utc),
+            'stop_reason': reason,
+            'notes': notes
+            }
         cols = data.keys()
         values = [data[key] for key in cols]
         update_data = make_update_data(cols, values)
         template = make_update_template(values)
         statement = ('UPDATE %s' % self.schema) + '.log SET ' + template + \
                     ' WHERE start_time=%s'
-        self.execute(statement, update_data + [opts.start_time,] )
+        self.execute(statement, update_data + [opts.start_time, ])
         self.commit()
         print 'updated log'
 
     def create_moderator_table(self):
-        #this table does not use primary keys
-        self.execute(("""CREATE TABLE IF NOT EXISTS %s.moderators""" % self.schema) +
-                     """(subreddit VARCHAR(30),
-                     username VARCHAR(30),
-                     timestamp TIMESTAMP,
-                     pos INTEGER)""")
-        
+        # this table does not use primary keys
+        self.execute(
+            ("""CREATE TABLE IF NOT EXISTS %s.moderators""" % self.schema) +
+            """(subreddit VARCHAR(30),
+            username VARCHAR(30),
+            timestamp TIMESTAMP,
+            pos INTEGER)""")
+
     def create_traffic_table(self):
         self.execute("""CREATE TABLE IF NOT EXISTS %s.traffic(
         subreddit VARCHAR(30),
@@ -535,7 +563,7 @@ class Database(object):
         self.execute("""CREATE TABLE IF NOT EXISTS %s.related_subreddits(
         subreddit VARCHAR(30),
         related_subreddit VARCHAR(30),
-        relationship_type VARCHAR(7),
+        relationship_type VARCHAR(100),
         wiki_name TEXT,
         related_is_private BOOLEAN,
         timestamp TIMESTAMP)""" % self.schema)
@@ -547,10 +575,12 @@ class Database(object):
         name TEXT,
         timestamp TIMESTAMP)""" % self.schema)
 
+
 def make_update_data(cols, values):
-    d1 =  ((AsIs(col), val) for col, val in zip(cols, values) if val is not None)
+    d1 = ((AsIs(col), val) for col, val in zip(cols, values) if val is not None)
     merged = tuple(itertools.chain.from_iterable(d1))
     return list(merged)
+
 
 def make_update_template(values):
     return ','.join(['%s=%s' for v in values if v is not None])
